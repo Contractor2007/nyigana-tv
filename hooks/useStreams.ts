@@ -15,7 +15,7 @@ export function useStreams() {
   const fetchChannels = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await fetch('/channels.json');
+      const response = await fetch('/streams.json');
       
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

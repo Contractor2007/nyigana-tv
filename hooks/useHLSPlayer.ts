@@ -111,7 +111,7 @@ export function useHLSPlayer() {
 
   // Monitor buffer status
   useEffect(() => {
-    const interval = setInterval(() => {
+    const updateBufferStatus = () => {
       if (videoRef.current && videoRef.current.buffered.length > 0) {
         const bufferedEnd = videoRef.current.buffered.end(
           videoRef.current.buffered.length - 1
@@ -120,7 +120,10 @@ export function useHLSPlayer() {
         const bufferPercent = duration > 0 ? (bufferedEnd / duration) * 100 : 0;
         setBufferStatus(Math.round(bufferPercent));
       }
-    }, 1000);
+    };
+
+    const interval = setInterval(updateBufferStatus, 1000);
+    updateBufferStatus(); // Initial call
 
     return () => clearInterval(interval);
   }, []);
