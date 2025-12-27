@@ -631,7 +631,7 @@
     },
     {
       "id": 1038,
-      "title": "SPS Prime",
+      "title": "PSN 1",
       "description": "Mongolian sports channel",
       "url": "https://cdn4.skygo.mn/live/disk1/SPSPrime/HLSv3-FTA/SPSPrime.m3u8",
       "type": "hls",
@@ -648,7 +648,7 @@
     },
     {
       "id": 1039,
-      "title": "SPS Play",
+      "title": "PSN 2",
       "description": "Mongolian entertainment channel",
       "url": "https://cdn4.skygo.mn/live/disk1/SPSPlay/HLSv3-FTA/SPSPlay.m3u8",
       "type": "hls",
@@ -665,7 +665,7 @@
     },
     {
       "id": 1040,
-      "title": "SPS Fight",
+      "title": "PSN 4",
       "description": "Mongolian combat sports channel",
       "url": "http://cdn4.skygo.mn/live/disk1/SPSFight/HLS-FTA/SPSFight.m3u8",
       "type": "hls",

@@ -21,6 +21,7 @@ export default function ChannelPage() {
   const containerRef = useRef<HTMLDivElement>(null);
   const controlsRef = useRef<HTMLDivElement>(null);
   const infoPanelRef = useRef<HTMLDivElement>(null);
+  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [channel, setChannel] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -28,7 +29,7 @@ export default function ChannelPage() {
   
   // Player states
   const [volume, setVolume] = useState(0.7);
-  const [isMuted, setIsMuted] = useState(true);
+  const [isMuted, setIsMuted] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -40,7 +41,8 @@ export default function ChannelPage() {
   const [showKeyboardShortcuts, setShowKeyboardShortcuts] = useState(false);
   const [streamQuality, setStreamQuality] = useState('Auto');
   const [playbackRate, setPlaybackRate] = useState(1.0);
-  const [showMuteHint, setShowMuteHint] = useState(true);
+  const [showVolumeHint, setShowVolumeHint] = useState(true);
+  const [isMouseActive, setIsMouseActive] = useState(false);
 
   // Use custom hooks
   const { getChannelById } = useStreams();
@@ -117,27 +119,38 @@ export default function ChannelPage() {
     if (!channel || !videoRef.current) return;
 
     const video = videoRef.current;
-    video.muted = isMuted;
+    // Set volume but DO NOT mute by default
     video.volume = volume;
-
+    video.muted = false; // Explicitly set to not muted
+    
     // Set up buffer monitoring
     const cleanupBufferMonitor = monitorBuffer(video);
 
     // Load the stream
     loadStream(channel.url);
 
-    // Show mute hint for 3 seconds
-    setTimeout(() => setShowMuteHint(false), 3000);
+    // Show volume control hint for 3 seconds
+    setTimeout(() => setShowVolumeHint(false), 3000);
 
     return () => {
       if (cleanupBufferMonitor) cleanupBufferMonitor();
     };
-  }, [channel, isMuted, volume, loadStream, monitorBuffer]);
+  }, [channel, volume, loadStream, monitorBuffer]);
 
   // Handle fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNowFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isNowFullscreen);
+      
+      // Reset mouse activity state when entering fullscreen
+      if (isNowFullscreen) {
+        setIsMouseActive(false);
+        setShowControls(false);
+      } else {
+        setIsMouseActive(true);
+        setShowControls(true);
+      }
     };
 
     document.addEventListener('fullscreenchange', handleFullscreenChange);
@@ -165,26 +178,46 @@ export default function ChannelPage() {
     };
   }, []);
 
-  // Auto-hide controls
+  // Auto-hide controls and reset mouse activity
+  const resetInactivityTimer = useCallback(() => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+    }
+    
+    setIsMouseActive(true);
+    setShowControls(true);
+    
+    // Only hide controls in fullscreen mode after inactivity
+    if (isFullscreen) {
+      inactivityTimerRef.current = setTimeout(() => {
+        setIsMouseActive(false);
+        setShowControls(false);
+      }, 3000);
+    }
+  }, [isFullscreen]);
+
+  // Auto-hide controls on inactivity
   useEffect(() => {
-    if (!showControls || showInfoPanel || showKeyboardShortcuts) return;
+    if (showInfoPanel || showKeyboardShortcuts || !isFullscreen) return;
+    
+    resetInactivityTimer();
+    
+    return () => {
+      if (inactivityTimerRef.current) {
+        clearTimeout(inactivityTimerRef.current);
+      }
+    };
+  }, [showControls, showInfoPanel, showKeyboardShortcuts, isFullscreen, resetInactivityTimer]);
 
-    const timer = setTimeout(() => {
-      setShowControls(false);
-    }, 3000);
-
-    return () => clearTimeout(timer);
-  }, [showControls, showInfoPanel, showKeyboardShortcuts]);
-
-  // Hide mute hint after 5 seconds
+  // Hide volume hint after 5 seconds
   useEffect(() => {
-    if (showMuteHint) {
+    if (showVolumeHint) {
       const timer = setTimeout(() => {
-        setShowMuteHint(false);
+        setShowVolumeHint(false);
       }, 5000);
       return () => clearTimeout(timer);
     }
-  }, [showMuteHint]);
+  }, [showVolumeHint]);
 
   // Hide volume slider after delay
   useEffect(() => {
@@ -220,7 +253,7 @@ export default function ChannelPage() {
         setShowVolumeSlider(true);
       }
       
-      setShowMuteHint(false);
+      setShowVolumeHint(false);
     }
   }, [hookToggleMute]);
 
@@ -234,7 +267,7 @@ export default function ChannelPage() {
     setVolume(newVolume);
     setIsMuted(newVolume === 0);
     
-    setShowMuteHint(false);
+    setShowVolumeHint(false);
   }, []);
 
   const handleVolumeChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
@@ -250,17 +283,18 @@ export default function ChannelPage() {
 
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
 
+      // Reset inactivity timer on any key press
+      resetInactivityTimer();
+
       switch (e.key.toLowerCase()) {
         case ' ':
         case 'k':
           e.preventDefault();
           togglePlay();
-          setShowControls(true);
           break;
         case 'm':
           e.preventDefault();
           handleMuteToggle();
-          setShowControls(true);
           break;
         case 'f':
           if (e.ctrlKey || e.metaKey) {
@@ -278,42 +312,36 @@ export default function ChannelPage() {
         case 'arrowright':
           e.preventDefault();
           video.currentTime += 10;
-          setShowControls(true);
           break;
         case 'arrowleft':
           e.preventDefault();
           video.currentTime -= 10;
-          setShowControls(true);
           break;
         case 'arrowup':
           e.preventDefault();
           handleVolumeChangeDirect(Math.min(1, volume + 0.1));
-          setShowControls(true);
           setShowVolumeSlider(true);
           break;
         case 'arrowdown':
           e.preventDefault();
           handleVolumeChangeDirect(Math.max(0, volume - 0.1));
-          setShowControls(true);
           setShowVolumeSlider(true);
           break;
         case 'i':
           e.preventDefault();
           setShowInfoPanel(!showInfoPanel);
-          setShowControls(true);
           break;
         case '/':
         case '?':
           e.preventDefault();
           setShowKeyboardShortcuts(!showKeyboardShortcuts);
-          setShowControls(true);
           break;
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isFullscreen, showInfoPanel, showKeyboardShortcuts, volume, togglePlay, handleMuteToggle, toggleFullscreen, handleVolumeChangeDirect]);
+  }, [isFullscreen, showInfoPanel, showKeyboardShortcuts, volume, togglePlay, handleMuteToggle, toggleFullscreen, handleVolumeChangeDirect, resetInactivityTimer]);
 
   const handleSeek = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const video = videoRef.current;
@@ -346,7 +374,7 @@ export default function ChannelPage() {
 
   const handleMouseMove = () => {
     if (!showInfoPanel && !showKeyboardShortcuts) {
-      setShowControls(true);
+      resetInactivityTimer();
     }
   };
 
@@ -397,6 +425,16 @@ export default function ChannelPage() {
         -ms-overflow-style: none;
         scrollbar-width: none;
       }
+      
+      .fade-in-out {
+        opacity: 1;
+        transition: opacity 0.3s ease-in-out;
+      }
+      
+      .fade-in-out.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
     `;
     document.head.appendChild(style);
     
@@ -404,6 +442,9 @@ export default function ChannelPage() {
       document.head.removeChild(style);
     };
   }, []);
+
+  // Calculate if UI should be visible
+  const shouldShowUI = !isFullscreen || isMouseActive || showControls;
 
   if (loading) {
     return (
@@ -444,9 +485,9 @@ export default function ChannelPage() {
 
   return (
     <div className="min-h-screen bg-black text-white">
-      {/* Header */}
+      {/* Header - Always visible when not in fullscreen, hidden in fullscreen unless mouse active */}
       <header className={`fixed top-0 left-0 right-0 z-30 p-6 transition-all duration-300 ${
-        showControls && !isFullscreen ? 'opacity-100' : 'opacity-0 pointer-events-none'
+        !isFullscreen ? 'opacity-100' : isMouseActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}>
         <div className="flex justify-between items-center">
           <button
@@ -481,13 +522,21 @@ export default function ChannelPage() {
         ref={containerRef}
         className="relative bg-black w-full h-screen"
         onMouseMove={handleMouseMove}
-        onMouseLeave={() => !showInfoPanel && !showKeyboardShortcuts && setShowControls(false)}
+        onMouseLeave={() => {
+          if (isFullscreen && !showInfoPanel && !showKeyboardShortcuts) {
+            // Don't immediately hide when leaving container in fullscreen
+            // Let the inactivity timer handle it
+          }
+        }}
       >
         {/* Video Element */}
         <video
           ref={videoRef}
           className="w-full h-full object-contain"
-          onClick={togglePlay}
+          onClick={() => {
+            togglePlay();
+            resetInactivityTimer();
+          }}
         />
 
         {/* Buffering Overlay */}
@@ -525,22 +574,13 @@ export default function ChannelPage() {
           </div>
         )}
 
-        {/* Mute Hint */}
-        {showMuteHint && isMuted && (
-          <div className="absolute bottom-32 left-1/2 transform -translate-x-1/2 bg-black/80 px-6 py-4 rounded-2xl backdrop-blur-sm flex items-center gap-3 z-30 animate-pulse">
-            <FaVolumeMute className="text-xl" />
-            <div>
-              <p className="font-semibold">Stream is muted</p>
-              <p className="text-sm text-gray-300">Press <kbd className="px-2 py-1 bg-gray-700 rounded mx-1">M</kbd> to unmute</p>
-            </div>
-          </div>
-        )}
+        
 
         {/* Controls Overlay */}
         <div 
           ref={controlsRef}
-          className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-6 transition-transform duration-300 ${
-            showControls || isFullscreen ? 'translate-y-0' : 'translate-y-full'
+          className={`absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/90 via-black/50 to-transparent p-6 transition-all duration-300 ${
+            shouldShowUI ? 'translate-y-0 opacity-100' : 'translate-y-full opacity-0 pointer-events-none'
           }`}
         >
           {/* Progress Bar */}
@@ -564,6 +604,7 @@ export default function ChannelPage() {
                 value={(currentTime / duration) * 100 || 0}
                 onChange={handleSeek}
                 className="absolute top-0 left-0 w-full h-full opacity-0 cursor-pointer"
+                onClick={resetInactivityTimer}
               />
             </div>
             
@@ -578,7 +619,10 @@ export default function ChannelPage() {
             <div className="flex items-center gap-6">
               {/* Play/Pause */}
               <button
-                onClick={togglePlay}
+                onClick={() => {
+                  togglePlay();
+                  resetInactivityTimer();
+                }}
                 className="w-14 h-14 rounded-full bg-white hover:bg-gray-200 flex items-center justify-center transition-all hover:scale-105 active:scale-95"
               >
                 {isPlaying ? (
@@ -591,7 +635,10 @@ export default function ChannelPage() {
               {/* Volume Control */}
               <div className="flex items-center gap-3">
                 <button
-                  onClick={handleMuteToggle}
+                  onClick={() => {
+                    handleMuteToggle();
+                    resetInactivityTimer();
+                  }}
                   className="p-3 hover:bg-white/10 rounded-xl transition-colors"
                   title={isMuted ? "Unmute (M)" : "Mute (M)"}
                 >
@@ -604,7 +651,10 @@ export default function ChannelPage() {
                   max="1"
                   step="0.01"
                   value={volume}
-                  onChange={handleVolumeChange}
+                  onChange={(e) => {
+                    handleVolumeChange(e);
+                    resetInactivityTimer();
+                  }}
                   className="w-24 h-1.5 bg-gray-700 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
                 />
               </div>
@@ -626,15 +676,24 @@ export default function ChannelPage() {
             <div className="flex items-center gap-4">
               {/* Playback Speed */}
               <div className="relative group">
-                <button className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm transition-colors">
+                <button 
+                  className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-xl text-sm transition-colors"
+                  onClick={resetInactivityTimer}
+                >
                   {playbackRate}x Speed
                 </button>
                 
-                <div className="absolute bottom-full right-0 mb-2 bg-black/95 p-2 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity min-w-40 hide-scrollbar overflow-y-auto max-h-60 custom-scrollbar">
+                <div 
+                  className="absolute bottom-full right-0 mb-2 bg-black/95 p-2 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity min-w-40 hide-scrollbar overflow-y-auto max-h-60 custom-scrollbar"
+                  onMouseEnter={resetInactivityTimer}
+                >
                   {[0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(rate => (
                     <button
                       key={rate}
-                      onClick={() => changePlaybackRate(rate)}
+                      onClick={() => {
+                        changePlaybackRate(rate);
+                        resetInactivityTimer();
+                      }}
                       className={`block w-full text-left px-4 py-3 hover:bg-white/10 rounded-lg transition-colors ${
                         playbackRate === rate ? 'text-red-500 bg-white/5' : ''
                       }`}
@@ -647,7 +706,10 @@ export default function ChannelPage() {
 
               {/* Info Button */}
               <button
-                onClick={() => setShowInfoPanel(true)}
+                onClick={() => {
+                  setShowInfoPanel(true);
+                  resetInactivityTimer();
+                }}
                 className="p-3 hover:bg-white/10 rounded-xl transition-colors"
                 title="Channel Info (I)"
               >
@@ -656,7 +718,10 @@ export default function ChannelPage() {
 
               {/* Fullscreen */}
               <button
-                onClick={toggleFullscreen}
+                onClick={() => {
+                  toggleFullscreen();
+                  resetInactivityTimer();
+                }}
                 className="p-3 hover:bg-white/10 rounded-xl transition-colors"
                 title={isFullscreen ? "Exit Fullscreen (F)" : "Fullscreen (F)"}
               >
@@ -666,13 +731,7 @@ export default function ChannelPage() {
           </div>
         </div>
 
-        {/* Channel Title Overlay */}
-        <div className={`absolute top-24 left-8 z-20 transition-all duration-300 ${
-          showControls || isFullscreen ? 'opacity-100' : 'opacity-0'
-        }`}>
-          <h1 className="text-5xl font-bold mb-3">{channel.title}</h1>
-          <p className="text-gray-300 text-xl max-w-3xl">{channel.description}</p>
-        </div>
+        
       </div>
 
       {/* Channel Info Panel */}
@@ -785,7 +844,7 @@ export default function ChannelPage() {
                     <div className="flex items-center gap-2">
                       <span className="text-white font-medium">Volume:</span>
                       <span>{Math.round(volume * 100)}%</span>
-                      <span>{isMuted ? '(Muted)' : ''}</span>
+                      <span>{isMuted ? '(Muted)' : '(Unmuted)'}</span>
                     </div>
                     <div className="flex items-center gap-2">
                       <span className="text-white font-medium">Encryption:</span>
@@ -813,7 +872,7 @@ export default function ChannelPage() {
                         {channel.tags.map((tag: string, index: number) => (
                           <span key={index} className="px-3 py-1 bg-blue-500/20 text-blue-400 rounded-full text-sm">
                             {tag}
-                          </span>
+                        </span>
                         ))}
                       </div>
                     </div>
@@ -919,14 +978,15 @@ export default function ChannelPage() {
                 </div>
               </div>
 
-              <div className="mt-8 p-6 bg-red-500/10 border border-red-500/20 rounded-xl">
+              <div className="mt-8 p-6 bg-blue-500/10 border border-blue-500/20 rounded-xl">
                 <div className="flex items-center gap-3 mb-3">
-                  <FaVolumeMute className="text-red-500" />
-                  <span className="font-semibold">Mute/Unmute Tip</span>
+                  <FaVolumeUp className="text-blue-500" />
+                  <span className="font-semibold">Volume Control Tips</span>
                 </div>
                 <p className="text-gray-300">
-                  The stream starts muted (required for autoplay). Press <kbd className="px-2 py-1 bg-gray-800 rounded mx-1">M</kbd> 
-                  anytime to toggle mute. When muted, you'll see a volume indicator showing you can press M to unmute.
+                  The stream starts with audio enabled. Press <kbd className="px-2 py-1 bg-gray-800 rounded mx-1">M</kbd> 
+                  anytime to toggle mute. Use <kbd className="px-2 py-1 bg-gray-800 rounded mx-1">↑</kbd> and 
+                  <kbd className="px-2 py-1 bg-gray-800 rounded mx-1">↓</kbd> to adjust volume quickly.
                 </p>
               </div>
             </div>
@@ -934,9 +994,9 @@ export default function ChannelPage() {
         </div>
       )}
 
-      {/* Connection Quality Indicator */}
-      <div className={`fixed bottom-4 left-4 z-30 transition-opacity duration-300 ${
-        showControls || isFullscreen ? 'opacity-100' : 'opacity-0'
+      {/* Connection Quality Indicator - Hidden in fullscreen unless mouse active */}
+      <div className={`fixed bottom-4 left-4 z-30 transition-all duration-300 ${
+        !isFullscreen ? 'opacity-100' : isMouseActive ? 'opacity-100' : 'opacity-0 pointer-events-none'
       }`}>
         <div className={`flex items-center gap-3 px-4 py-3 rounded-xl backdrop-blur-sm ${
           connectionQuality === 'good' ? 'bg-green-500/20 text-green-400' :
